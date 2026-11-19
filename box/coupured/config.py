@@ -25,6 +25,10 @@ class Settings:
     lnd_macaroon: str = field(default_factory=lambda: _env("LND_MACAROON", "/lnd/coupured.macaroon"))
     # the local mint
     mint_url: str = field(default_factory=lambda: _env("MINT_URL", "http://nutshell:3338"))
+    settlement_url: str = field(default_factory=lambda: _env("SETTLEMENT_URL", "http://settlement:8000"))
+    queue_token: str = field(default_factory=lambda: _env("QUEUE_TOKEN"))
+    operator_pin: str = field(default_factory=lambda: _env("OPERATOR_PIN"))
+    snapshots_dir: str = field(default_factory=lambda: _env("SNAPSHOTS_DIR", "/snapshots"))
     # island detection
     probe_interval_s: float = field(default_factory=lambda: float(_env("PROBE_INTERVAL_S", "2")))
     probe_timeout_s: float = field(default_factory=lambda: float(_env("PROBE_TIMEOUT_S", "2")))

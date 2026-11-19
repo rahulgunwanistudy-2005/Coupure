@@ -16,7 +16,7 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints
 
 from . import logs
 
@@ -26,6 +26,10 @@ Bolt11 = Annotated[str, StringConstraints(pattern=r"^lnbcrt[0-9a-z]{20,1800}$")]
 
 class PayIn(BaseModel):
     bolt11: Bolt11
+
+
+class InvoiceIn(BaseModel):
+    amount_sat: int = Field(ge=1, le=200000)
 
 
 def create_app() -> FastAPI:
@@ -45,6 +49,14 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict[str, bool]:
         return {"ok": os.path.exists(mac_path)}
+
+    @app.get("/price")
+    async def price() -> dict[str, Any]:
+        # External fetching is deliberately WAN-side: the box can only reach it through the cable.
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get("https://mempool.space/api/v1/prices")
+            r.raise_for_status()
+            return {"EUR": r.json()["EUR"]}
 
     @app.post("/pay")
     async def pay(body: PayIn) -> dict[str, Any]:
@@ -73,5 +85,13 @@ def create_app() -> FastAPI:
         if final.get("status") != "SUCCEEDED":
             raise HTTPException(502, f"paiement Lightning échoué ({final.get('failure_reason', 'inconnu')})")
         return {"status": "SUCCEEDED", "amount_sat": amount}
+
+    @app.post("/invoice")
+    async def invoice(body: InvoiceIn) -> dict[str, Any]:
+        """SIMULATED receiving wallet: real LND invoice for the queue's regtest cash-out."""
+        async with client() as c:
+            r = await c.post("/v1/invoices", json={"value": str(body.amount_sat), "expiry": "86400"})
+            r.raise_for_status()
+            return {"payment_request": r.json()["payment_request"]}
 
     return app

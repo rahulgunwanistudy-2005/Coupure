@@ -8,14 +8,30 @@ export function sumSats(proofs: Array<{ amount: bigint | number | string | { toB
 }
 
 export function toSats(a: bigint | number | string | { toBigInt(): bigint }): bigint {
-	if (typeof a === 'bigint') return a;
-	if (typeof a === 'object') return a.toBigInt();
+	if (typeof a === 'bigint') {
+		if (a < 0n) throw new RangeError('amount must be a non-negative integer');
+		return a;
+	}
+	if (typeof a === 'object') return toSats(a.toBigInt());
 	if (typeof a === 'number') {
 		if (!Number.isSafeInteger(a) || a < 0) throw new RangeError('amount must be a non-negative integer');
 		return BigInt(a);
 	}
 	if (!/^\d+$/.test(a)) throw new RangeError('amount must be a non-negative integer');
 	return BigInt(a);
+}
+
+// Exact EUR/XOF peg (655.957), with BTC/EUR expressed in euro cents. Display only.
+const XOF_DENOMINATOR = 100_000_000n * 100_000n;
+export function satsToXof(sats: bigint, btcEurCents: bigint): bigint {
+	if (sats < 0n || btcEurCents <= 0n) throw new RangeError('invalid price or amount');
+	return (sats * btcEurCents * 655_957n + XOF_DENOMINATOR / 2n) / XOF_DENOMINATOR;
+}
+
+/** Conservative cap conversion: never round up the spendable risk budget. */
+export function xofToSats(xof: bigint, btcEurCents: bigint): bigint {
+	if (xof < 0n || btcEurCents <= 0n) throw new RangeError('invalid price or amount');
+	return (xof * XOF_DENOMINATOR) / (btcEurCents * 655_957n);
 }
 
 export function formatSats(sats: bigint): string {
