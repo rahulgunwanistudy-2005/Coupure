@@ -1,0 +1,287 @@
+# Coupure: the box and "the world", in one compose project.
+#
+#   box  (internal: no route out) : caddy(+), coupured, postgres, nutshell, lnd-box, uplink(+)
+#   wan                           : bitcoind, lnd-world, world-faucet, uplink(+)
+#   edge                          : caddy(+) only, to publish the LAN port to the host
+#
+# `uplink` is the only container on both networks: it is the cable. Box services reach the world only
+# through its relay ports, so cutting it is a real partition (see infra/uplink/relay.py).
+# Images are pinned by tag here and by digest in docs/VERSIONS.md (digest pinning lands in G5).
+
+name: coupure
+
+x-btc-rpc: &btc_rpc
+  BITCOIN_RPC_USER: ${BITCOIN_RPC_USER:?run make env}
+  BITCOIN_RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD:?run make env}
+
+networks:
+  box:
+    internal: true
+    ipam:
+      config: [{ subnet: 10.77.0.0/24 }]
+  wan:
+    ipam:
+      config: [{ subnet: 10.78.0.0/24 }]
+  edge: {}
+
+volumes:
+  bitcoind: {}
+  lnd-world: {}
+  lnd-box: {}
+  pgdata: {}
+  box-creds: {}   # tls.cert + baked macaroons for lnd-box (no admin.macaroon)
+  world-creds: {} # tls.cert + faucet macaroon for lnd-world
+  coupured: {}
+
+services:
+  # ------------------------------------------------------------------ the world (behind the cable)
+  bitcoind:
+    image: bitcoin/bitcoin:32.1
+    restart: unless-stopped
+    networks: [wan]
+    volumes: [bitcoind:/home/bitcoin/.bitcoin]
+    command:
+      - -regtest=1
+      - -server=1
+      - -txindex=1
+      - -fallbackfee=0.00020
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=10.78.0.0/24
+      - -rpcuser=${BITCOIN_RPC_USER}
+      - -rpcpassword=${BITCOIN_RPC_PASSWORD}
+      - -zmqpubrawblock=tcp://0.0.0.0:28332
+      - -zmqpubrawtx=tcp://0.0.0.0:28333
+      - -printtoconsole=1
+    healthcheck:
+      test: ["CMD-SHELL", "bitcoin-cli -regtest -rpcuser=$$BITCOIN_RPC_USER -rpcpassword=$$BITCOIN_RPC_PASSWORD getblockchaininfo >/dev/null"]
+      interval: 3s
+      retries: 40
+    environment: *btc_rpc
+
+  miner:
+    # SIMULATED: regtest has no miners. One block a minute keeps the tip fresh, as mainnet would.
+    image: bitcoin/bitcoin:32.1
+    restart: unless-stopped
+    networks: [wan]
+    depends_on: { bitcoind: { condition: service_healthy } }
+    volumes: [./miner/mine.sh:/mine.sh:ro]
+    entrypoint: ["/bin/sh", "/mine.sh"]
+    environment:
+      <<: *btc_rpc
+      MINER_INTERVAL_S: "60"
+
+  lnd-world:
+    # The diaspora sender / exchange / vendor's self-custody wallet: everything outside the island.
+    image: lightninglabs/lnd:v0.21.8-beta
+    restart: unless-stopped
+    networks: [wan]
+    depends_on: { bitcoind: { condition: service_healthy } }
+    volumes: [lnd-world:/root/.lnd]
+    command:
+      - --alias=world
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoind.rpchost=bitcoind:18443
+      - --bitcoind.rpcuser=${BITCOIN_RPC_USER}
+      - --bitcoind.rpcpass=${BITCOIN_RPC_PASSWORD}
+      - --bitcoind.zmqpubrawblock=tcp://bitcoind:28332
+      - --bitcoind.zmqpubrawtx=tcp://bitcoind:28333
+      - --noseedbackup
+      - --listen=0.0.0.0:9735
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --tlsextradomain=lnd-world
+      - --trickledelay=50
+      - --accept-keysend
+      - --debuglevel=info
+    healthcheck:
+      test: ["CMD-SHELL", "lncli --network=regtest getinfo >/dev/null"]
+      interval: 3s
+      retries: 60
+
+  world-creds:
+    # one-shot: faucet macaroon (offchain read/write only) + cert into world-creds
+    image: lightninglabs/lnd:v0.21.8-beta
+    restart: "no"
+    networks: [wan]
+    depends_on: { lnd-world: { condition: service_healthy } }
+    volumes: [lnd-world:/lnd:ro, world-creds:/creds, ./creds/bake.sh:/bake.sh:ro]
+    entrypoint: ["/bin/sh", "/bake.sh"]
+    environment:
+      NODE: lnd-world
+      BAKE: "faucet.macaroon=offchain:read,offchain:write"
+
+  world-faucet:
+    # SIMULATED sender ("someone abroad"): pays box invoices over real Lightning. Reachable only through the cable.
+    build: ../box
+    image: coupure/coupured:dev
+    restart: unless-stopped
+    networks: [wan]
+    depends_on: { world-creds: { condition: service_completed_successfully } }
+    volumes: [world-creds:/lnd:ro]
+    command: ["uvicorn", "coupured.world:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    environment:
+      LND_REST: https://lnd-world:8080
+      LND_CERT: /lnd/tls.cert
+      LND_MACAROON: /lnd/faucet.macaroon
+      FAUCET_MAX_SAT: "200000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 3s
+      retries: 30
+
+  # ------------------------------------------------------------------ the cable
+  uplink:
+    build: ./uplink
+    image: coupure/uplink:dev
+    restart: unless-stopped
+    cap_add: [NET_ADMIN] # nftables only; no Docker socket, no host network
+    networks:
+      box: { ipv4_address: 10.77.0.2 }
+      wan: {}
+    environment:
+      DEMO_MODE: ${DEMO_MODE:-0}
+      UPLINK_TOKEN: ${UPLINK_TOKEN:-}
+      UPLINK_ROUTES: "18443=bitcoind:18443,28332=bitcoind:28332,28333=bitcoind:28333,9735=lnd-world:9735,8090=world-faucet:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 18443), 2)"]
+      interval: 3s
+      retries: 20
+
+  # ------------------------------------------------------------------ the box
+  lnd-box:
+    image: lightninglabs/lnd:v0.21.8-beta
+    restart: unless-stopped
+    networks:
+      box: { ipv4_address: 10.77.0.3 }
+    depends_on:
+      uplink: { condition: service_healthy }
+      bitcoind: { condition: service_healthy }
+    volumes: [lnd-box:/root/.lnd]
+    command:
+      - --alias=coupure-box
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      # chain backend and peers are reached only through the cable
+      - --bitcoind.rpchost=uplink:18443
+      - --bitcoind.rpcuser=${BITCOIN_RPC_USER}
+      - --bitcoind.rpcpass=${BITCOIN_RPC_PASSWORD}
+      - --bitcoind.zmqpubrawblock=tcp://uplink:28332
+      - --bitcoind.zmqpubrawtx=tcp://uplink:28333
+      # stay alive on the island: lnd would otherwise shut itself down when bitcoind is unreachable
+      - --healthcheck.chainbackend.attempts=0
+      - --noseedbackup
+      - --nolisten
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --tlsextradomain=lnd-box
+      - --trickledelay=50
+      - --debuglevel=info
+    healthcheck:
+      test: ["CMD-SHELL", "lncli --network=regtest getinfo >/dev/null"]
+      interval: 3s
+      retries: 60
+
+  box-creds:
+    # one-shot: least-privilege macaroons + cert into box-creds; nothing else mounts lnd-box's data dir
+    image: lightninglabs/lnd:v0.21.8-beta
+    restart: "no"
+    networks: [box]
+    depends_on: { lnd-box: { condition: service_healthy } }
+    volumes: [lnd-box:/lnd:ro, box-creds:/creds, ./creds/bake.sh:/bake.sh:ro]
+    entrypoint: ["/bin/sh", "/bake.sh"]
+    environment:
+      NODE: lnd-box
+      # mint: create/look up invoices, pay, probe routes. coupured: watch channels/peers, reconnect peers.
+      BAKE: >-
+        mint.macaroon=info:read,offchain:read,offchain:write,invoices:read,invoices:write
+        coupured.macaroon=info:read,offchain:read,peers:read,peers:write
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    networks:
+      box: { ipv4_address: 10.77.0.4 }
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run make env}
+      MINT_DB_PASSWORD: ${MINT_DB_PASSWORD:?run make env}
+      COUPURED_RO_PASSWORD: ${COUPURED_RO_PASSWORD:?run make env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mint"]
+      interval: 2s
+      retries: 30
+
+  nutshell:
+    image: cashubtc/nutshell:0.22.1
+    restart: unless-stopped
+    networks:
+      box: { ipv4_address: 10.77.0.5 }
+    depends_on:
+      postgres: { condition: service_healthy }
+      box-creds: { condition: service_completed_successfully }
+    volumes:
+      - box-creds:/lnd:ro
+    command: ["poetry", "run", "mint"]
+    environment:
+      MINT_LISTEN_HOST: 0.0.0.0
+      MINT_LISTEN_PORT: "3338"
+      MINT_DATABASE: postgres://mint:${MINT_DB_PASSWORD}@postgres:5432/mint
+      MINT_MNEMONIC: ${MINT_MNEMONIC:?run make env}
+      MINT_BACKEND_BOLT11_SAT: LndRestWallet
+      MINT_LND_REST_ENDPOINT: https://lnd-box:8080
+      MINT_LND_REST_CERT: /lnd/tls.cert
+      MINT_LND_REST_MACAROON: /lnd/mint.macaroon
+      MINT_INPUT_FEE_PPK: "0"
+      MINT_FORWARDED_ALLOW_IPS: 10.77.0.10 # only Caddy may set X-Forwarded-For
+      MINT_INFO_NAME: ${MINT_INFO_NAME:-Coupure (démo)}
+      MINT_INFO_DESCRIPTION: "Mint de marché sur réseau local. Fonctionne sans internet."
+      # Market-sized rate limits (per client IP, behind Caddy): see docs/THREAT_MODEL.md
+      MINT_RATE_LIMIT: "TRUE"
+      MINT_GLOBAL_RATE_LIMIT_PER_MINUTE: "240"
+      MINT_TRANSACTION_RATE_LIMIT_PER_MINUTE: "60"
+      MINT_MAX_BALANCE: "50000000"
+      MINT_MAX_MINT_BOLT11_SAT: "2000000"
+      MINT_MAX_MELT_BOLT11_SAT: "2000000"
+      LOG_LEVEL: INFO
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3338/v1/info >/dev/null"]
+      interval: 3s
+      retries: 60
+
+  coupured:
+    build: ../box
+    image: coupure/coupured:dev
+    restart: unless-stopped
+    networks:
+      box: { ipv4_address: 10.77.0.6 }
+    depends_on:
+      box-creds: { condition: service_completed_successfully }
+      nutshell: { condition: service_healthy }
+    volumes: [coupured:/data, box-creds:/lnd:ro]
+    environment:
+      DEMO_MODE: ${DEMO_MODE:-0}
+      UPLINK_TOKEN: ${UPLINK_TOKEN:-}
+      LND_MACAROON: /lnd/coupured.macaroon
+      LND_CERT: /lnd/tls.cert
+      MINT_URL: http://nutshell:3338
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
+      interval: 3s
+      retries: 30
+
+  caddy:
+    build:
+      context: ..
+      dockerfile: infra/caddy/Dockerfile
+    image: coupure/caddy:dev
+    restart: unless-stopped
+    networks:
+      box: { ipv4_address: 10.77.0.10 }
+      edge: {}
+    ports: ["${HTTP_PORT:-8080}:8080"]
+    depends_on:
+      coupured: { condition: service_healthy }
+      nutshell: { condition: service_healthy }

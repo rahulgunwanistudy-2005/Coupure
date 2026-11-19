@@ -1,0 +1,60 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    # No stack: lint, types, unit and property tests for the box daemon and the wallet engine.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.8.23"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: wallet/package-lock.json
+      - name: shellcheck
+        run: shellcheck -x -P SCRIPTDIR scripts/*.sh infra/postgres/init.sh infra/creds/bake.sh infra/miner/mine.sh
+      - name: box (ruff, pytest + hypothesis)
+        run: make test-box
+      - name: wallet (svelte-check, vitest + fast-check)
+        run: make test-wallet
+
+  stack:
+    # The real stack: G0 (mint quote paid over Lightning), a real partition, then the island demo in a browser.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: wallet/package-lock.json
+      - name: G0 (boot, fund, channels, mint quote paid over LN)
+        run: make g0
+      - name: island partition
+        run: make partition
+      - name: playwright
+        working-directory: wallet
+        run: npm ci --no-audit --no-fund && npx playwright install --with-deps chromium
+      - name: E2E island demo (three phones, cut, double-spend refused, restore)
+        run: make e2e
+      - name: logs on failure
+        if: failure()
+        run: docker compose --env-file .env -f infra/compose.yaml logs --tail=200
+      - name: e2e videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: wallet/test-results/
+          retention-days: 7

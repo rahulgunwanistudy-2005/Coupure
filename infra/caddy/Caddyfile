@@ -1,0 +1,44 @@
+# The box's front door. G1 serves plain HTTP on the LAN; G5 adds the real TLS origin (DNS-01 cert).
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	encode zstd gzip
+	request_body {
+		max_size 64KB
+	}
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		Content-Security-Policy "frame-ancestors 'none'"
+		Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=()"
+		Cross-Origin-Opener-Policy same-origin
+		-Server
+	}
+
+	# Cashu mint (Nutshell). Caddy sets X-Forwarded-For so the mint rate-limits per phone.
+	handle_path /mint/* {
+		reverse_proxy nutshell:3338
+	}
+
+	# Box daemon. flush_interval -1 keeps the SSE island stream live.
+	handle /api/* {
+		reverse_proxy coupured:8000 {
+			flush_interval -1
+		}
+	}
+
+	# Wallet (static SPA). Hashed assets are immutable; the shell is never cached stale.
+	handle {
+		root * /srv/wallet
+		@immutable path /_app/immutable/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+		@shell not path /_app/immutable/*
+		header @shell Cache-Control "no-cache"
+		try_files {path} /200.html
+		file_server
+	}
+}
