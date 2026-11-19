@@ -19,10 +19,31 @@ export async function loadSealed(): Promise<Sealed | undefined> {
 	return (await db()).get(STORE, 'main');
 }
 
-export async function saveSealed(s: Sealed): Promise<void> {
-	await (await db()).put(STORE, s, 'main');
+export async function loadVault(): Promise<{ sealed: Sealed | undefined; revision: number }> {
+	const tx = (await db()).transaction(STORE, 'readonly');
+	const sealed = await tx.store.get('main');
+	const revision = (await tx.store.get('revision')) ?? 0;
+	await tx.done;
+	return { sealed, revision };
 }
 
-export async function wipe(): Promise<void> {
-	await (await db()).delete(STORE, 'main');
+export class VaultConflict extends Error {}
+
+export async function saveSealed(s: Sealed, expected: number): Promise<number> {
+	const tx = (await db()).transaction(STORE, 'readwrite');
+	const current = (await tx.store.get('revision')) ?? 0;
+	if (current !== expected) { await tx.done; throw new VaultConflict('wallet changed in another tab'); }
+	await tx.store.put(s, 'main');
+	await tx.store.put(current + 1, 'revision');
+	await tx.done;
+	return current + 1;
+}
+
+export async function wipe(expected: number): Promise<void> {
+	const tx = (await db()).transaction(STORE, 'readwrite');
+	const current = (await tx.store.get('revision')) ?? 0;
+	if (current !== expected) { await tx.done; throw new VaultConflict('wallet changed in another tab'); }
+	await tx.store.delete('main');
+	await tx.store.put(current + 1, 'revision');
+	await tx.done;
 }

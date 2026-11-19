@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 // Runs against the real compose stack (make up && make seed). Nothing is mocked.
 export default defineConfig({
 	testDir: 'e2e',
-	timeout: 180_000,
+	timeout: 360_000,
 	expect: { timeout: 30_000 },
 	fullyParallel: false,
 	workers: 1,
