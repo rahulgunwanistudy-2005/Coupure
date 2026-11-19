@@ -81,3 +81,12 @@ test('routing reserve cannot exceed the signed maximum debit',async()=>{
  });
  await q.drain(async()=> 'invoice');assert.equal(q.data.jobs[0].state,'QUEUED');assert.equal(q.summary().held_sat,'100');
 });
+
+test('change is released only to the signed owner and the same claim is replayable',async()=>{
+ const i=intent();const C=Buffer.from(getPubKeyFromPrivKey(key)).toString('hex');
+ const q=await queue([{...job({state:'SETTLED',paymentProofs:[],change:[{id:'00aabbccddee1122',amount:'2',secret:'change',C}]}),...i}]);
+ const body={id:i.id,pubkey:i.pubkey,signature:schnorrSignMessage(JSON.stringify({v:1,id:i.id,action:'claim-change'}),key)};
+ await assert.rejects(q.claimChange({...body,pubkey:'00'.repeat(32)},'http://box/mint'));
+ const first=await q.claimChange(body,'http://box/mint');const second=await q.claimChange(body,'http://box/mint');
+ assert.ok(first.token.startsWith('cashuB'));assert.equal(first.token,second.token);assert.equal(q.summary().held_sat,'0');
+});

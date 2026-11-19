@@ -18,7 +18,7 @@ networks:
   box:
     internal: true
     ipam:
-      config: [{ subnet: 10.77.0.0/24 }]
+      config: [{ subnet: 10.77.0.0/24, ip_range: 10.77.0.128/25 }]
   wan:
     ipam:
       config: [{ subnet: 10.78.0.0/24 }]

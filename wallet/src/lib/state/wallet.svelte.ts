@@ -540,7 +540,10 @@ class WalletApp {
 						const change = await api.cashoutChange(signChange(d.mnemonic, item.intent.id));
 						if (change.token) {
 							const w = await this.#w();
-							d.proofs.push(...(await this.#swapReceive(w, change.token)).map(store));
+							const returned = await this.#swapReceive(w, change.token);
+							d.proofs.push(...returned.map(store));
+							d.history.unshift({ id: `change:${item.intent.id}`, ts: Date.now(), kind: 'received',
+								amount: String(sumSats(returned)), status: 'final' });
 						}
 						item.changeClaimed = true;
 					}

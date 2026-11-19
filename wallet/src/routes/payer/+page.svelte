@@ -6,6 +6,7 @@
 
 	let input = $state('');
 	let error = $state('');
+	let busy = $state(false);
 	let sent = $state<{ token: string; id: string } | null>(null);
 	const claimed = $derived(sent ? app.data?.history.find((h) => h.id === sent!.id)?.status === 'claimed' : false);
 
@@ -15,11 +16,12 @@
 		if (amount === null) return void (error = t('common.amount.invalid'));
 		if (amount > app.balance) return void (error = t('pay.insufficient'));
 		error = '';
+		busy = true;
 		try {
 			sent = await app.pay(amount);
 		} catch {
 			error = t('island.hint.UNKNOWN');
-		}
+		} finally { busy = false; }
 	}
 </script>
 
@@ -29,7 +31,7 @@
 		<form class="stack" onsubmit={prepare}>
 			<label for="pay-amount">{t('common.amount')}</label>
 			<input id="pay-amount" data-testid="pay-amount" inputmode="numeric" bind:value={input} />
-			<button class="primary" type="submit" data-testid="pay-create">{t('pay.create')}</button>
+			<button class="primary" type="submit" disabled={busy} data-testid="pay-create">{t('pay.create')}</button>
 		</form>
 	{:else}
 		<p>{t('pay.show')}</p>

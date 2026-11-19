@@ -1,0 +1,9 @@
+# Use with the base compose file. Obtain a DNS-01 certificate before entering the island.
+services:
+  caddy:
+    environment:
+      BOX_DOMAIN: ${BOX_DOMAIN:?set BOX_DOMAIN to the certificate hostname}
+    ports: !override ["443:8443"]
+    volumes:
+      - ${TLS_CERT_DIR:?set TLS_CERT_DIR to the DNS-01 certificate directory}:/certs:ro
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile.tls", "--adapter", "caddyfile"]

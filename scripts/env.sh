@@ -4,6 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 umask 077
 rand() { openssl rand -hex "${1:-16}"; }
+operator_pin() { local n; n=$(od -An -N4 -tu4 /dev/urandom | tr -d " "); printf "%08d" "$((n % 100000000))"; }
 if [[ ! -f .env ]]; then
   mnemonic=$(docker run --rm --entrypoint python cashubtc/nutshell:0.22.1 \
     -c "from mnemonic import Mnemonic; print(Mnemonic('english').generate(128))")
@@ -12,7 +13,7 @@ if [[ ! -f .env ]]; then
     if [[ $line == *"=CHANGE_ME" ]]; then
       case "$key" in
         MINT_MNEMONIC) echo "$key=\"$mnemonic\"" ;;
-        OPERATOR_PIN) echo "$key=$(od -An -N4 -tu4 /dev/urandom | tr -d ' ' | cut -c1-8)" ;;
+        OPERATOR_PIN) echo "$key=$(operator_pin)" ;;
         QUEUE_KEY) echo "$key=$(rand 32)" ;;
         *) echo "$key=$(rand)" ;;
       esac
@@ -27,7 +28,7 @@ for key in QUEUE_KEY QUEUE_TOKEN OPERATOR_PIN; do
     case "$key" in
       QUEUE_KEY) echo "$key=$(rand 32)" >>.env ;;
       QUEUE_TOKEN) echo "$key=$(rand)" >>.env ;;
-      OPERATOR_PIN) echo "$key=$(od -An -N4 -tu4 /dev/urandom | tr -d ' ' | cut -c1-8)" >>.env ;;
+      OPERATOR_PIN) echo "$key=$(operator_pin)" >>.env ;;
     esac
   fi
 done

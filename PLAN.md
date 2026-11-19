@@ -1,69 +1,33 @@
-# Coupure: execution plan
+# Coupure execution status
 
-Solo entry, Dakar Bitcoin Hack 2026 (BTrust). Each gate passes in CI, then gets a `v0.N-demoable` tag.
-Cut order if a gate is at risk: P2, then P1. Cuts are recorded in `docs/ROADMAP.md`. Never cut P0 tests,
-the double-spend demo, or the README.
+Source of scope: the original master build brief and the existing G1 vertical slice. Priority remains P0 before optional sponsor integrations. The implementation is a custodial **regtest MVP**, not a real-money launch.
 
-## Spine
+| Area | Implemented in this pass | Evidence / remaining work |
+|---|---|---|
+| T2 engine | Required DLEQ, pinned keys, duplicate/seen rejection, aggregate FCFA cap, explicit provisional history and return-to-box swaps | Actual cryptographic unit tests; final browser round trip retained in CI |
+| Money persistence | Awaited deterministic counters, send/receive swap journals, PIN-vault revision checks, bounded in-process PIN retry backoff | Wallet tests/types/build pass; cross-tab and response-loss browser drills remain |
+| Cash-out | Signed intentions, immediate local custody, encrypted fsynced storage, quote-aware retries/backoff, signed change release | Eight durable-queue tests; actual LND settlement in expanded E2E |
+| Transparency | Real SELECT-only mint snapshot, stale-data refusal, channel-only reserve coverage and verified ledger head | Backend tests; real DB privilege check in CI |
+| UI | French/English receipt design, marked partial Wolof, payment stamps, operator console, public board, walkthrough, camera fallback and static offline shell | Production build and payload budgets; screenshot/Lighthouse/device review pending |
+| Security | Operator sessions, stream-counted body limits, trusted-proxy IP handling, HTTPS overlay, audit job and STRIDE notes | Backend tests/config pass; audits, physical TLS and digest pinning not claimed |
+| Release material | README, architecture, deployment/Pi instructions, demo script, Devpost draft, share kit, upstream drafts, measured-workload runner | No invented deployment URL, video, benchmark or release tag |
 
-| Tier | Where | Mechanism | Finality |
-|---|---|---|---|
-| T1 | In range of the box | Receiver swaps at the local mint (NUT-03), state check (NUT-07), UI driven by NUT-17 | Final, no internet |
-| T2 | Out of range | DLEQ vs cached keyset (NUT-12) + local seen-set + amount ≤ cap + pinned keyset; optional P2PK envelopes (NUT-11) | Provisional; auto-swap on return; double-spend flagged |
-| T3 | Uplink back | Mint resumes LN mint/melt (NUT-04/05), queued cash-outs execute, attestations publish | Settled |
+## Acceptance checks
 
-## Topology decisions (G0)
+```bash
+make test
+make g0
+scripts/readonly_check.sh
+make partition
+make e2e
+SIM_PAYMENTS=20 make sim
+make audit
+```
 
-- Two Docker networks. `box` (internal, no default route): caddy, nutshell, postgres, coupured, lnd-box,
-  relay. `wan`: bitcoind, lnd-world, public-relay stand-in. The `uplink` container is the only member of
-  both and is the cable.
-- `uplink` is a TCP relay with a kill switch (`infra/uplink/`). Box services reach the world only through
-  named relay ports on `uplink` (bitcoind RPC, ZMQ, lnd-world p2p, price/relay HTTP). Cutting tears down
-  every relayed flow and refuses new ones; nftables in the same container drops the ports as defence in
-  depth. Toggle API is token-protected and only started with `DEMO_MODE=1`.
-- `lnd-box` has its chain-backend healthcheck disabled so it keeps serving the mint's REST calls while
-  bitcoind is unreachable.
-- Mint: Nutshell 0.22.1 image, `LndRestWallet`, Postgres, `MINT_INPUT_FEE_PPK=0`, `MINT_MNEMONIC`
-  from `.env`. coupured reads the mint DB through a read-only role (`balance` view for liabilities).
+`docs/VERIFICATION.md` records which checks actually ran. `docs/METRICS.md` stays unmeasured until the real workload runs. The CI workflow retains the full real-socket test and records videos/metrics.
 
-## Phases
+## Explicit cuts and handoff
 
-### G0 Recon (P0)
-- [ ] `docs/VERSIONS.md` from real sources (done for core deps; extend as libraries are added)
-- [ ] `infra/compose.yaml`: bitcoind, lnd-box, lnd-world, uplink, postgres, nutshell
-- [ ] `scripts/bootstrap.sh`: create wallets, mine, fund both LNDs, connect through uplink, open channels both ways
-- [ ] `scripts/g0_check.sh`: mint quote paid over Lightning by lnd-world, proofs issued
-- [ ] `make up`, `make seed`, `make g0`
+BDK reserve signing, Nostr attestations, NWC sweeps, P2PK envelopes, animated QR and the market visualizer are deferred. Full details and external prerequisites are in `docs/ROADMAP.md`. Do not claim those sponsor integrations or tick a phase gate merely because its code exists.
 
-### G1 Vertical slice (P0)
-- Wallet (SvelteKit static, cashu-ts 4.13.1, unstyled): create/restore (BIP39 → NUT-13, NUT-09), mint via LN,
-  pay T1, "Déjà dépensé" on replay
-- coupured skeleton: FastAPI, IslandMonitor (probes + hysteresis + SSE), ledger (hash chain)
-- Caddy routes `/`, `/mint/*`, `/api/*`; uplink toggle works; reconnect works
-- Playwright E2E steps 1–5
-
-### G2 Engine complete (P0)
-- T2 acceptance + auto-swap; CashOutQueue; Liabilities invariant; IslandMonitor SSE; sim → METRICS.md
-  with 0 accepted T1 double-spends; E2E 1–9
-
-### G3 Design (P0/P1)
-- frontend-design skill; all screens; i18n fr/en/wo `[wo-review]`; signature animations; Lighthouse budgets
-  (≤150 KB gz JS, ≤350 KB total, TTI < 3 s); screenshot self-critique at 360×800 and 1280×800
-
-### G4 Sponsor depth (P1)
-- BDK 2-of-3 cold reserve, watch-only, PSBT flow; Nostr attestations (kind 30078, `d=coupure:attest`);
-  NWC `make_invoice`-only sweep; Tableau
-
-### G5 Hardening (P0/P1)
-- THREAT_MODEL (STRIDE) with a test per mitigation; HTTPS-on-LAN (DNS-01) verified on a real Android;
-  captive-portal launcher; `pip-audit`/`npm audit` clean; strict CSP
-
-### G6 Ship (P0)
-- VPS with guided tour, auto-reset; README, DEMO_SCRIPT, DEVPOST, SHARE_KIT; upstream drafts in
-  `docs/upstream/`; fresh-clone test; tag `v1.0.0`
-
-## Decisions needed from the user (asked at gates only)
-- Domain for HTTPS-on-LAN (G5)
-- VPS host (G6)
-- Approval of upstream PR/issue texts (G6)
-- Raspberry Pi availability for the physical video (G5)
+A domain/VPS, physical Android/Pi access and actual video recording remain necessary for the original deployment/physical gates. Everything reviewable without them is implemented or documented. Publish the final completion branch, review CI, then merge only after the real-stack checks are resolved.

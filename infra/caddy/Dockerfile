@@ -11,6 +11,7 @@ RUN npm run build
 FROM caddy:2.11.9-alpine
 COPY --from=wallet /w/build /srv/wallet
 COPY infra/caddy/Caddyfile /etc/caddy/Caddyfile
+COPY infra/caddy/Caddyfile.tls /etc/caddy/Caddyfile.tls
 # unprivileged: listens on 8080, keeps its state in /tmp (no ACME on the LAN in G1)
 USER 10002:10002
 ENV XDG_DATA_HOME=/tmp XDG_CONFIG_HOME=/tmp

@@ -5,8 +5,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 DC=(docker compose --env-file "$ROOT/.env" -f "$ROOT/infra/compose.yaml")
 
-# shellcheck disable=SC1091
-set -a; source "$ROOT/.env"; set +a
+set -a
+# shellcheck source=/dev/null
+source "$ROOT/.env"
+set +a
 
 btc() { "${DC[@]}" exec -T bitcoind bitcoin-cli -regtest -rpcuser="$BITCOIN_RPC_USER" -rpcpassword="$BITCOIN_RPC_PASSWORD" "$@"; }
 lnw() { "${DC[@]}" exec -T lnd-world lncli --network=regtest "$@"; }
