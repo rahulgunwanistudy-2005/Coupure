@@ -111,7 +111,7 @@ services:
     entrypoint: ["/bin/sh", "/bake.sh"]
     environment:
       NODE: lnd-world
-      BAKE: "faucet.macaroon=offchain:read,offchain:write,invoices:read,invoices:write"
+      BAKE: "faucet.macaroon=info:read,offchain:read,offchain:write,invoices:read,invoices:write"
 
   world-faucet:
     # SIMULATED sender ("someone abroad"): pays box invoices over real Lightning. Reachable only through the cable.

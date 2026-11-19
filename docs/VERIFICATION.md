@@ -4,7 +4,7 @@ Date: 20 November 2026, India time. This file distinguishes executed checks from
 
 ## Executed locally
 
-- Backend: **18 tests passed**, excluding the existing real-socket `test_http_probe_up_and_down`. That test cannot bind a socket under this task's sandbox; it remains in the suite and runs in CI.
+- Backend: **19 tests passed**, excluding the existing real-socket `test_http_probe_up_and_down`. That test cannot bind a socket under this task's sandbox; it remains in the suite and runs in CI.
 - Wallet: **20 tests passed** (Vitest and fast-check), including actual blind-signature/DLEQ fixtures, cumulative exposure, exact FCFA arithmetic, forged coins, duplicated Ys and signed intent tampering.
 - Settlement: **8 tests passed**, covering encrypted durable storage, wrong keys/tampering, restart recovery, lost PAID responses, PENDING/expired quotes, idempotency, maximum debit and signed change release.
 - Ruff lint and formatting: passed.
@@ -30,7 +30,7 @@ docker compose --env-file .env -f infra/compose.yaml config --quiet
 
 ## GitHub CI evidence
 
-On commit `f286825`, the full unit job passed, including the socket-binding backend test, wallet tests, all eight queue tests, ShellCheck and the production build/payload budgets. The previous commit's dependency audit passed; a later audit hit a truncated package download rather than a reported vulnerability. Auditing the fully pinned uv export without reinstalling its dependencies avoids that unrelated download path. Real-stack CI is being used to resolve startup/Lightning readiness before the final gate is declared.
+On commit `855a0d8`, the full unit and audit jobs passed. The unit job includes the socket-binding backend test, the route-readiness regression test, wallet tests, all eight queue tests, ShellCheck and production build/payload budgets. The previous commit's dependency audit passed; a later audit hit a truncated package download rather than a reported vulnerability. Auditing the fully pinned uv export without reinstalling its dependencies avoids that unrelated download path. Real-stack CI is being used to resolve startup/Lightning readiness before the final gate is declared.
 
 ## Not executed locally
 

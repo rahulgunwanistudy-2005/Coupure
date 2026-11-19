@@ -7,7 +7,8 @@ source "$(dirname "$0")/lib.sh"
 if "${DC[@]}" exec -T postgres sh -c '
   export PGPASSWORD="$COUPURED_RO_PASSWORD"
   psql -X -v ON_ERROR_STOP=1 -h postgres -U coupured_ro -d mint \
-    -c "SET default_transaction_read_only = off; UPDATE mint_quotes SET amount = amount WHERE false;"
+    -c "SET default_transaction_read_only = off" \
+    -c "UPDATE mint_quotes SET amount = amount WHERE false;"
 ' >/dev/null 2>&1; then
   die "read-only mint role unexpectedly has write privileges"
 fi

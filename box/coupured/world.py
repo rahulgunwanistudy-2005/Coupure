@@ -2,7 +2,7 @@
 
 Runs on the WAN side next to lnd-world and is reachable from the box only through the cable. It pays a
 regtest bolt11 invoice with real Lightning via lnd-world's REST API, using a macaroon baked with
-offchain:read + offchain:write only. Amounts are capped. Not part of the box.
+scoped payment, invoice and route-read permissions. Amounts are capped. Not part of the box.
 
 LND REST paths (verified at v0.21.8-beta): GET /v1/payreq/{pay_req}, POST /v2/router/send (streams JSON
 lines; SendPaymentSync no longer exists in 0.21).
