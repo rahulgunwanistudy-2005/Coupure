@@ -58,6 +58,21 @@ def create_app() -> FastAPI:
             r.raise_for_status()
             return {"EUR": r.json()["EUR"]}
 
+    @app.get("/ready")
+    async def ready() -> dict[str, bool]:
+        """Channel active flags can precede graph propagation; require an actual payable route."""
+        async with client() as c:
+            channels = await c.get("/v1/channels")
+            channels.raise_for_status()
+            active = [ch for ch in channels.json().get("channels", []) if ch.get("active")]
+            if len(active) < 2:
+                raise HTTPException(503, "channels not ready")
+            pubkey = active[0]["remote_pubkey"]
+            routes = await c.get(f"/v1/graph/routes/{pubkey}/1000")
+            if routes.status_code != 200 or not routes.json().get("routes"):
+                raise HTTPException(503, "routing graph not ready")
+        return {"ready": True}
+
     @app.post("/pay")
     async def pay(body: PayIn) -> dict[str, Any]:
         async with client() as c:

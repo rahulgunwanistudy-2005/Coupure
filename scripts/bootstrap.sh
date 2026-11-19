@@ -70,5 +70,10 @@ active_two() {
 }
 wait_for "both nodes report two active channels" 90 active_two
 
+# An active channel can still be absent from the sender's routing graph for a few seconds.
+# The WAN-side helper checks LND's real QueryRoutes response before we issue the first invoice.
+world_route_ready() { mint_curl http://uplink:8090/ready | jq -e '.ready == true'; }
+wait_for "world has a payable route to the box" 90 world_route_ready
+
 lnb listchannels | jq -r '.channels[] | "  channel \(.chan_id): local \(.local_balance) / remote \(.remote_balance) sat"'
 say "bootstrap done"

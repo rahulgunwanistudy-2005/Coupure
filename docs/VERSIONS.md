@@ -143,3 +143,5 @@ The world-side quote fetch uses `https://mempool.space/api/v1/prices` and the EU
 Full container digest pinning and dependency-audit results remain release gates. No tag-only image is described as digest-pinned.
 
 `pip-audit` 2.9.0 CLI source was checked at tag `v2.9.0`: `--disable-pip --no-deps -r` audits a fully pinned requirements export without dependency resolution or reinstalling wheels. The uv lock already supplies the complete dependency graph.
+
+LND v0.21.8-beta `lnrpc/lightning.swagger.json` was read to confirm `GET /v1/graph/routes/{pub_key}/{amt}`. The WAN helper now waits for a real route, not only bilateral channel-active flags, before initial funding.
