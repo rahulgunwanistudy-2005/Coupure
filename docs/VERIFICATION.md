@@ -28,6 +28,10 @@ node scripts/check-budget.mjs
 docker compose --env-file .env -f infra/compose.yaml config --quiet
 ```
 
+## GitHub CI evidence
+
+On commit `f286825`, the full unit job passed, including the socket-binding backend test, wallet tests, all eight queue tests, ShellCheck and the production build/payload budgets. The previous commit's dependency audit passed; a later audit hit a truncated package download rather than a reported vulnerability. Auditing the fully pinned uv export without reinstalling its dependencies avoids that unrelated download path. Real-stack CI is being used to resolve startup/Lightning readiness before the final gate is declared.
+
 ## Not executed locally
 
 The Docker daemon was stopped/unavailable. The sandbox also denies socket binding, shell network DNS and Chromium launch. Therefore the final-revision real mint/Lightning browser demo, workload metrics, screenshot review, Lighthouse, fresh-host run and dependency audits could not be certified locally. The corresponding checks are retained/extended in GitHub Actions, not skipped or relabelled as passing.

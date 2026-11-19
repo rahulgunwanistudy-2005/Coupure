@@ -60,4 +60,4 @@ sim: seed
 audit:
 	cd wallet && npm audit --omit=dev --audit-level=high
 	cd box && uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt > /tmp/coupure-requirements.txt
-	uvx pip-audit==2.9.0 -r /tmp/coupure-requirements.txt
+	uvx pip-audit==2.9.0 --disable-pip --no-deps -r /tmp/coupure-requirements.txt

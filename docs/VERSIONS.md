@@ -141,3 +141,5 @@ SvelteKit 3.2's installed build code explicitly removes `$service-worker`. The w
 The world-side quote fetch uses `https://mempool.space/api/v1/prices` and the EUR field. Source retrieval was unavailable in this environment; runtime availability and schema validation remain part of the real-stack price check. Missing quotes fail closed for T2 and do not block T1.
 
 Full container digest pinning and dependency-audit results remain release gates. No tag-only image is described as digest-pinned.
+
+`pip-audit` 2.9.0 CLI source was checked at tag `v2.9.0`: `--disable-pip --no-deps -r` audits a fully pinned requirements export without dependency resolution or reinstalling wheels. The uv lock already supplies the complete dependency graph.

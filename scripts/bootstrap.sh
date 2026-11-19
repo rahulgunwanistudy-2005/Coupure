@@ -64,8 +64,11 @@ if (( $(initiated_by_world) == 0 )); then
   mine 6
 fi
 
-active_two() { [[ $(lnb listchannels --active_only | jq '.channels | length') -ge 2 ]]; }
-wait_for "two active channels on lnd-box" 90 active_two
+active_two() {
+  [[ $(lnb listchannels --active_only | jq '.channels | length') -ge 2 ]] &&
+    [[ $(lnw listchannels --active_only | jq '.channels | length') -ge 2 ]]
+}
+wait_for "both nodes report two active channels" 90 active_two
 
 lnb listchannels | jq -r '.channels[] | "  channel \(.chan_id): local \(.local_balance) / remote \(.remote_balance) sat"'
 say "bootstrap done"
