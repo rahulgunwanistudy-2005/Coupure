@@ -6,7 +6,7 @@ Date: 20 November 2026, India time. This file distinguishes executed checks from
 
 - Backend: **19 tests passed**, excluding the existing real-socket `test_http_probe_up_and_down`. That test cannot bind a socket under this task's sandbox; it remains in the suite and runs in CI.
 - Wallet: **20 tests passed** (Vitest and fast-check), including actual blind-signature/DLEQ fixtures, cumulative exposure, exact FCFA arithmetic, forged coins, duplicated Ys and signed intent tampering.
-- Settlement: **8 tests passed**, covering encrypted durable storage, wrong keys/tampering, restart recovery, lost PAID responses, PENDING/expired quotes, idempotency, maximum debit and signed change release.
+- Settlement: **9 tests passed**, covering encrypted durable storage, wrong keys/tampering, restart recovery, lost PAID responses, PENDING/expired quotes, idempotency, maximum debit and signed change release.
 - Ruff lint and formatting: passed.
 - Svelte diagnostics: zero errors and warnings on the last checked source.
 - Production static build: passed, including the SvelteKit 3 service worker API.
@@ -43,3 +43,5 @@ The expanded browser scenario covers funding, online payment, actual WAN cut, lo
 The local Git metadata is read-only in this task, so the existing G1 snapshot was imported into the previously empty GitHub repository and subsequent changes published as conventional commits through the connected account. The baseline import cites local commit `2bd1c78`. Original local history was not rewritten. Commit messages have no AI/co-author trailers; the repository's existing development disclosure was retained.
 
 A public URL/video, native Wolof review, real Android HTTPS check and physical-box recording remain external release prerequisites. `v1.0.0` must not be tagged until those required gates are actually passed or explicitly rescaled in the release scope.
+
+The previous real-stack run passed funding, the actual partition, replay refusal, T2 acceptance/reconciliation and both viewport tests. It exposed a cashu-ts token-decoder integration mismatch in withdrawal submission; the loaded-wallet decoder and a ninth settlement regression test address it. The final full-stack rerun must confirm settlement and seed restore. Public-screen CI screenshots were inspected at 360 and 1280 CSS pixels; the board number scale was reduced to avoid awkward monetary wrapping.

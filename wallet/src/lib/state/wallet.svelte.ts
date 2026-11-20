@@ -583,7 +583,7 @@ class WalletApp {
 		this.#mutating = true;
 		try {
 		const w = await this.#w();
-		const { proofs, lastCounterWithSignature } = await w.batchRestore();
+		const { proofs, lastCounterWithSignature } = await w.batchRestore(300, 32); // stay below the LAN gateway request-size budget
 		const unspent: Proof[] = [];
 		if (proofs.length) {
 			const states = await w.checkProofsStates(proofs);

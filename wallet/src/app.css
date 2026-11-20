@@ -17,3 +17,5 @@ nav{position:sticky;bottom:0;z-index:10;display:flex;justify-content:space-aroun
 
 .app-root{display:contents}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* Keep complete monetary values on one line in the public board's narrow columns. */
+.board-stat .stat{font-size:clamp(1.5rem,3vw,2.5rem);letter-spacing:-.045em}
