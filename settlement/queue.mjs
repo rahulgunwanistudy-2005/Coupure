@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
-  Wallet, Amount, getDecodedToken, serializeSwapPreview, deserializeSwapPreview,
+  Wallet, Amount, serializeSwapPreview, deserializeSwapPreview,
   MeltQuoteState, schnorrVerifyMessage, getEncodedToken
 } from '@cashu/cashu-ts';
 
@@ -87,12 +87,12 @@ export class CashOutQueue {
       // prevent replay; reject timestamps from the future rather than imposing a short WAN deadline.
       if (intent.created_at > this.now() + 5 * 60_000) throw new Error('future intent');
       if (this.data.jobs.filter((j) => j.state !== 'SETTLED').length >= 500) throw new Error('queue full');
-      const decoded = getDecodedToken(token);
+      const w = await this.w();
+      const decoded = w.decodeToken(token);
       // The gateway rewrites only the mint origin. Unknown mint tokens are refused before any swap.
       if (decoded.mint.replace(/\/$/, '') !== publicMint.replace(/\/$/, '') ||
           decoded.unit !== 'sat' || decoded.proofs.length > 64 || total(decoded.proofs) !== BigInt(intent.amount))
         throw new Error('invalid token or amount');
-      const w = await this.w();
       const preview = await w.prepareSwapToReceive(decoded.proofs, { requireDleq: true });
       const job = { ...intent, digest, state: 'RECEIVING', preview: serializeSwapPreview(preview),
         proofs: [], change: [], attempts: 0, next_at: 0 };

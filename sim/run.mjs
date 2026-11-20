@@ -1,7 +1,7 @@
 // A measured workload against the real isolated regtest stack. No fake mint or in-memory ledger.
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
-import { Wallet, getEncodedToken, getDecodedToken, MintQuoteState } from '../wallet/node_modules/@cashu/cashu-ts/lib/cashu-ts.es.js';
+import { Wallet, getEncodedToken, MintQuoteState } from '../wallet/node_modules/@cashu/cashu-ts/lib/cashu-ts.es.js';
 const origin = process.env.COUPURE_URL || 'http://localhost:8080';
 const count = Number(process.env.SIM_PAYMENTS || 20);
 if (!Number.isSafeInteger(count) || count < 2 || count > 500) throw new Error('SIM_PAYMENTS must be between 2 and 500');
@@ -53,7 +53,7 @@ async function payment(index){
  latencies.push(performance.now()-start);payments++;
  if(index%5===0){
   attempted++;await sleep(2200);
-  try{const target=wallets[receiver===wallets[1]?2:1];target.proofs.push(...await target.w.receive(getDecodedToken(token),{requireDleq:true}));accepted++;}
+  try{const target=wallets[receiver===wallets[1]?2:1];target.proofs.push(...await target.w.receive(target.w.decodeToken(token),{requireDleq:true}));accepted++;}
   catch(e){if(!/already spent/i.test(String(e)))throw e;}
  }
  await invariant();

@@ -16,7 +16,7 @@ async function go(page: Page, path: string): Promise<void> {
 }
 
 async function phone(browser: Browser, stall?: string): Promise<Page> {
-	const ctx = await browser.newContext();
+	const ctx = await browser.newContext({ recordVideo: { dir: test.info().outputPath('videos'), size: { width: 360, height: 800 } } });
 	const page = await ctx.newPage();
 	await page.goto('/');
 	await page.getByTestId('onb-create').click();

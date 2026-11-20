@@ -90,3 +90,15 @@ test('change is released only to the signed owner and the same claim is replayab
  const first=await q.claimChange(body,'http://box/mint');const second=await q.claimChange(body,'http://box/mint');
  assert.ok(first.token.startsWith('cashuB'));assert.equal(first.token,second.token);assert.equal(q.summary().held_sat,'0');
 });
+
+test('new queue submissions decode V4 tokens using the loaded wallet keysets',async()=>{
+ const {getEncodedToken,getDecodedToken,Amount}=await import('@cashu/cashu-ts');
+ const id='00aabbccddee1122';let decoded=false;
+ const token=getEncodedToken({mint:'http://mint',unit:'sat',proofs:[{id,amount:Amount.from(100),secret:'test coin',C:Buffer.from(getPubKeyFromPrivKey(key)).toString('hex')}]});
+ const q=await queue([],{
+  decodeToken(value){decoded=true;return getDecodedToken(value,[id]);},
+  async prepareSwapToReceive(){throw new Error('reached swap preparation');}
+ });
+ await assert.rejects(q.enqueue(intent(),token),/reached swap preparation/);
+ assert.equal(decoded,true);
+});
