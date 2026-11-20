@@ -8,7 +8,7 @@
 	let replay = $state<string | null>(null);
 	const when = (ms: number) =>
 		new Date(ms).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-	const sign = { topup: '+', received: '+', sent: '−', refused: '✕ ' } as const;
+	const sign = { topup: '+', received: '+', sent: '−', refused: '✕ ', cashout: '−' } as const;
 </script>
 
 <main class="stack">

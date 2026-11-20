@@ -18,7 +18,7 @@ networks:
   box:
     internal: true
     ipam:
-      config: [{ subnet: 10.77.0.0/24 }]
+      config: [{ subnet: 10.77.0.0/24, ip_range: 10.77.0.128/25 }]
   wan:
     ipam:
       config: [{ subnet: 10.78.0.0/24 }]
@@ -32,6 +32,8 @@ volumes:
   box-creds: {}   # tls.cert + baked macaroons for lnd-box (no admin.macaroon)
   world-creds: {} # tls.cert + faucet macaroon for lnd-world
   coupured: {}
+  settlement: {}
+  snapshots: {}
 
 services:
   # ------------------------------------------------------------------ the world (behind the cable)
@@ -109,7 +111,7 @@ services:
     entrypoint: ["/bin/sh", "/bake.sh"]
     environment:
       NODE: lnd-world
-      BAKE: "faucet.macaroon=offchain:read,offchain:write"
+      BAKE: "faucet.macaroon=info:read,offchain:read,offchain:write,invoices:read,invoices:write"
 
   world-faucet:
     # SIMULATED sender ("someone abroad"): pays box invoices over real Lightning. Reachable only through the cable.
@@ -260,15 +262,45 @@ services:
     depends_on:
       box-creds: { condition: service_completed_successfully }
       nutshell: { condition: service_healthy }
-    volumes: [coupured:/data, box-creds:/lnd:ro]
+    volumes: [coupured:/data, box-creds:/lnd:ro, snapshots:/snapshots:ro]
     environment:
       DEMO_MODE: ${DEMO_MODE:-0}
       UPLINK_TOKEN: ${UPLINK_TOKEN:-}
       LND_MACAROON: /lnd/coupured.macaroon
       LND_CERT: /lnd/tls.cert
       MINT_URL: http://nutshell:3338
+      QUEUE_TOKEN: ${QUEUE_TOKEN:?run make env}
+      OPERATOR_PIN: ${OPERATOR_PIN:?run make env}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
+      interval: 3s
+      retries: 30
+
+  liabilities:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    networks: [box]
+    depends_on: { nutshell: { condition: service_healthy } }
+    volumes: [snapshots:/snapshots, ./postgres/snapshot.sh:/snapshot.sh:ro]
+    entrypoint: ["/bin/sh", "/snapshot.sh"]
+    environment:
+      PGPASSWORD: ${COUPURED_RO_PASSWORD:?run make env}
+
+  settlement:
+    build:
+      context: ..
+      dockerfile: settlement/Dockerfile
+    restart: unless-stopped
+    networks: [box]
+    depends_on: { nutshell: { condition: service_healthy } }
+    volumes: [settlement:/data]
+    environment:
+      DEMO_MODE: ${DEMO_MODE:-0}
+      QUEUE_KEY: ${QUEUE_KEY:?run make env}
+      QUEUE_TOKEN: ${QUEUE_TOKEN:?run make env}
+      MINT_URL: http://nutshell:3338
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8000/health').then(r=>{if(!r.ok)process.exit(1)})"]
       interval: 3s
       retries: 30
 

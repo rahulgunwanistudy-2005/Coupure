@@ -123,3 +123,27 @@ the body-size guard returns a `JSONResponse(413)` instead.
 - If `docker pull` or `docker build` hangs with `error getting credentials - signal: terminated`, the Docker
   Desktop credential helper is stuck. Public images need no credentials: point `DOCKER_CONFIG` at a directory
   whose `config.json` has no `credsStore` (copy `contexts/` and `cli-plugins/`), or restart Docker Desktop.
+
+## Completion pass: APIs checked against installed source
+
+Checked in the installed cashu-ts 4.13.1 type declarations and ES implementation:
+
+- `verifyMintSignatures(proofs, getKeyset, { require: true })` returns `{valid, invalid}` and the low-level function does not fetch keys. The T2 policy calls only cached `keyChain.getKeyset(id)`; signatures are tested with actual Cashu blind/DLEQ primitives.
+- `Wallet` accepts an asynchronous `CounterSource` with `reserve` and `advanceToAtLeast`. Those writes now finish before the wallet generates/sends new outputs.
+- `prepareSwapToReceive`, `prepareSwapToSend`, `serializeSwapPreview`, `deserializeSwapPreview` and `completeSwap` support storing exact outputs for NUT-19 replay. `receive` returns kept output proofs.
+- `checkMeltQuoteBolt11` uses `MeltQuoteState.PENDING/PAID`; `meltProofsBolt11` returns `{quote, change, outputData}`. Passing `nut08Change: false` explicitly forgoes the unused routing reserve.
+- `schnorrSignMessage` / `schnorrVerifyMessage` and `getPubKeyFromPrivKey` provide the queue intention identity; the latter takes and returns bytes. A domain-separated seed hash derives a distinct signing key; this is not claimed as P2PK envelope support.
+
+Nutshell source at tag `0.22.1`, `cashu/mint/migrations.py`, was retrieved during this pass. `create_balance_views` exposes `balance(keyset, balance) = balance_issued - balance_redeemed`. The exporter uses that view with the SELECT-only role; it does not guess liabilities from HTTP receipts.
+
+SvelteKit 3.2's installed build code explicitly removes `$service-worker`. The worker uses `$app/manifest` (`immutable`, `assets`) and `$app/env` (`version`) instead. Manifest paths are normalized to root-relative URLs before caching/matching. The production static build verifies this integration.
+
+The world-side quote fetch uses `https://mempool.space/api/v1/prices` and the EUR field. Source retrieval was unavailable in this environment; runtime availability and schema validation remain part of the real-stack price check. Missing quotes fail closed for T2 and do not block T1.
+
+Full container digest pinning and dependency-audit results remain release gates. No tag-only image is described as digest-pinned.
+
+`pip-audit` 2.9.0 CLI source was checked at tag `v2.9.0`: `--disable-pip --no-deps -r` audits a fully pinned requirements export without dependency resolution or reinstalling wheels. The uv lock already supplies the complete dependency graph.
+
+LND v0.21.8-beta `lnrpc/lightning.swagger.json` was read to confirm `GET /v1/graph/routes/{pub_key}/{amt}`. The WAN helper now waits for a real route, not only bilateral channel-active flags, before initial funding.
+
+LND `rpcserver.go` at the same tag maps QueryRoutes to `info:read`, which the world helper now receives in addition to its scoped payment/invoice permissions. No admin macaroon is passed to that helper.

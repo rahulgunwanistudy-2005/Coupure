@@ -31,7 +31,12 @@ class Receipts:
             r = await c.post(f"{self.mint_url}/v1/checkstate", json={"Ys": ys})
             r.raise_for_status()
             states = r.json().get("states", [])
-        return len(states) == len(ys) and all(s.get("state") == "SPENT" for s in states)
+        return (
+            len(states) == len(ys)
+            and len(set(ys)) == len(ys)
+            and {s.get("Y") for s in states} == set(ys)
+            and all(s.get("state") == "SPENT" for s in states)
+        )
 
     def register(self, stall: str, ys: list[str]) -> int:
         """Insert first-seen Ys. Returns how many were new."""

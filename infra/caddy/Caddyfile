@@ -1,4 +1,4 @@
-# The box's front door. G1 serves plain HTTP on the LAN; G5 adds the real TLS origin (DNS-01 cert).
+# The box front door. Use compose.tls.yaml and a DNS-01 certificate for HTTPS on the LAN.
 {
 	admin off
 	auto_https off

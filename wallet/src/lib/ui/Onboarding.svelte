@@ -35,7 +35,7 @@
 		if (pin !== pin2) return void (error = t('onb.pin.mismatch'));
 		error = '';
 		step = 'busy';
-		if (mode === 'create') return app.create(mnemonic, pin);
+		if (mode === 'create') { try { await app.create(mnemonic, pin); } catch { error = t('common.error'); step = 'pin'; } return; }
 		note = t('onb.restoring');
 		try {
 			const amount = await app.restore(mnemonic, pin);
@@ -47,7 +47,9 @@
 </script>
 
 <main class="stack">
-	<h1>{t('onb.title')}</h1>
+	<p class="eyebrow">{t('onb.kicker')}</p>
+	<h1 class="display">{t('onb.promise')}</h1>
+	<p class="note">{t('onb.warning')}</p>
 	{#if step === 'start'}
 		<button class="primary" data-testid="onb-create" onclick={startCreate}>{t('onb.create')}</button>
 		<button data-testid="onb-restore" onclick={() => ((mode = 'restore'), (step = 'restore'))}>

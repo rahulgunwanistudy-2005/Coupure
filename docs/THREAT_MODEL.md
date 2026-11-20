@@ -1,4 +1,6 @@
-# Threat model (working draft: STRIDE per component lands in G5)
+# Threat model
+
+Historical G0/G1 decisions are preserved below. The completion-pass STRIDE table records current mitigations, executed evidence and remaining release checks.
 
 Each line: decision → threat it addresses → test that proves it (or `TODO` with the gate).
 
@@ -36,12 +38,42 @@ Each line: decision → threat it addresses → test that proves it (or `TODO` w
 
 ## Known gaps (to close before G5)
 - ~~The mint mounts the whole `lnd-box` volume and uses `admin.macaroon`~~: fixed in G1 (creds volume, baked macaroons).
-- With `DEMO_MODE=1`, any phone on the LAN can call `/api/demo/island` and `/api/demo/fund` (rate-limited, 10/min).
-  The uplink itself needs coupured's token. G5: put demo controls behind an operator PIN, and keep `DEMO_MODE=0`
-  the default for anything that is not a stage demo.
+- The G1 public cable toggle is now protected by the operator session. The regtest faucet remains public and rate-limited while DEMO_MODE=1. Disable demo mode outside a stage demo.
 - HTTP on the LAN in G1: a phone on the same Wi-Fi could tamper with the wallet bundle. HTTPS-on-LAN is G5
   (needs a domain from the operator).
 - RPC credentials are passed as command-line flags (visible to `ps` inside the containers). Regtest only; move to
   config files with mode 600 before any non-regtest use.
 - `lnd-box` uses `--noseedbackup`: the hot wallet seed is not backed up. Acceptable for regtest; a real box needs
   a seed backup held by the Garants.
+
+## Completion pass: STRIDE across the new boundaries
+
+| Boundary / class | Threat and mitigation | Evidence |
+|---|---|---|
+| Phone → mint, spoofing | Foreign mint/unit/keyset refused; T2 uses required real DLEQ against first-use pinned keys only | `tiers.test.ts` cryptographic fixtures and foreign/missing/forged cases |
+| Offline receipt, tampering | Seen-Y set rejects duplicates; cap applies to total outstanding provisional exposure; that value is excluded from spendable proofs | `tiers.test.ts`; browser runner round trip pending execution |
+| Browser storage, tampering | PIN encryption authenticates the blob. IndexedDB revision compare-and-swap rejects writes from stale tabs. Counters await durable writes | vault tests; cross-tab storage browser check pending |
+| Mint response, repudiation/reliability | Receive/send journals persist exact previews before requests; NUT-19 replays preserve original outputs | source-verified API; full response-loss stack test still required |
+| Browser → cash-out service, spoofing | Domain-separated Schnorr identity signs ID, total debit, destination and creation time. Server validates signature; changed IDs/bodies cannot reuse a request | `tiers.test.ts`, `queue.test.mjs` |
+| Queue storage, tampering/disclosure | AES-256-GCM with a separate 32-byte environment key; atomic file replacement and fsync; service has no published port | `queue.test.mjs` encrypted restart, wrong-key and tamper tests |
+| Queue retries, financial integrity | Existing quote checked before every retry; PENDING not resubmitted; PAID terminal; expiry requires review; retry backoff retains proofs | `queue.test.mjs`; browser real-Lightning settlement pending |
+| Withdrawal amount, tampering | Invoice amount plus maximum routing reserve may not exceed the signed debit. Change needs the same identity's signed claim | `queue.test.mjs` excessive fee / authorized replayable change tests |
+| Operator API, spoofing/elevation | Independent scrypt-verified PIN; 15-minute random bearer sessions kept only in browser memory; five login attempts per five minutes per real client | `test_security.py` wrong login, expiry, restart and XFF-spoof throttling |
+| Request boundary, denial of service | Streamed body bytes are counted, not merely Content-Length; malformed lengths rejected; public mutation routes rate-limited | `test_security.py` chunked and malformed-length tests |
+| Mint DB → transparency, elevation | SELECT-only export role, read-only daemon volume, timestamped atomic snapshots | `scripts/readonly_check.sh` (real-stack gate), stale/missing/invalid snapshot tests |
+| Public board, repudiation | Explicitly channel-only reserves; unavailable fields stay null; no solvency claim from incomplete data | `test_security.py::test_tableau_never_turns_missing_data_into_zero` |
+| LAN transport, spoofing/disclosure | DNS-01 certificate overlay and local hostname routing; visible warning in insecure HTTP fallback | Compose configuration checked; real Android/TLS gate pending |
+| Service worker, disclosure | Only static URLs cached; `/api` and `/mint` bypass caches; no tokens or invoices in CacheStorage | production build; full offline browser check pending |
+
+### Residual risks and precise claims
+
+- V1 is custodial. A malicious mint can issue unbacked coins or refuse swaps. The board is not an independently signed reserve proof; Nostr/BDK/NWC are explicitly deferred.
+- Local receipt attribution is untrusted metadata. Seeing spent Ys does not prove which stall actually accepted them; first registration can be raced. Never use it as authenticated evidence for punishment. The mint's replay refusal does not depend on attribution.
+- The local hash chain catches edits relative to a trusted head, but a privileged host can replace the whole database and all local anchors.
+- The six-digit phone PIN remains susceptible to offline brute force. In-process backoff deters casual guessing but resets on reload and is not a forensic defence. The application does not wipe money after failed attempts.
+- Cached keyset enrollment is trust on first use. A physical sticker/operator identity check is not implemented. Trusted HTTPS is required against a fake first hotspot; HTTP fallback is regtest-only.
+- A T2 coin may already be spent elsewhere. Its cap limits this phone's current aggregate exposure, not losses across independent phones or unlimited repeated visits. No offline double-spend prevention claim is made for T2.
+- Queue encryption protects a stolen data file, not a running-host administrator holding QUEUE_KEY. Back up the key and encrypted volume together under a separate access policy.
+- Cash-out destinations are regtest BOLT11 or the labelled demo receiver. No generic URL resolver or Lightning-address/NWC secret ingestion is exposed.
+- A fixed BOLT11 may expire during a long cut. Such a request stays pending for explicit review; automatic redirection would violate the signed destination.
+- Routing reserve is deliberately forfeited with NUT-08 blank change disabled. Separate excess proofs are reclaimable via a signed identity claim. The UI discloses the fee policy before submission.

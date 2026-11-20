@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { i18n, setLang, t, type Lang } from '#lib/i18n/index.svelte.ts';
-	import { api } from '#lib/state/api.ts';
 	import { app } from '#lib/state/wallet.svelte.ts';
 
 	let stall = $state(app.data?.stall ?? '');
 	let msg = $state('');
-	let demoMsg = $state('');
+	let cap = $state<number | undefined>(Number(app.data?.t2CapXof ?? 2000));
 	const langs: Array<[Lang, string]> = [
 		['fr', 'Français'],
 		['en', 'English'],
@@ -19,15 +18,6 @@
 		await app.setStall(s || null);
 		stall = s;
 		msg = t('settings.saved');
-	}
-
-	async function cable(action: 'cut' | 'restore') {
-		demoMsg = '';
-		try {
-			await api.demoIsland(action);
-		} catch (e) {
-			demoMsg = e instanceof Error ? e.message : String(e);
-		}
 	}
 
 	async function erase() {
@@ -53,12 +43,13 @@
 		{#if msg}<p role="status">{msg}</p>{/if}
 	</form>
 
-	<fieldset class="stack">
-		<legend>{t('settings.demo')}</legend>
-		<button data-testid="demo-cut" onclick={() => cable('cut')}>{t('settings.demo.cut')}</button>
-		<button data-testid="demo-restore" onclick={() => cable('restore')}>{t('settings.demo.restore')}</button>
-		{#if demoMsg}<p class="error" role="alert">{demoMsg}</p>{/if}
-	</fieldset>
+	<form class="stack" onsubmit={async (e) => { e.preventDefault(); try { await app.setT2Cap(BigInt(cap ?? -1)); msg = t('settings.saved'); } catch { msg = t('settings.t2.help'); } }}>
+		<label for="t2cap">{t('settings.t2')}</label>
+		<input id="t2cap" type="number" min="0" max="2000" step="1" bind:value={cap} disabled={app.exposure > 0n} />
+		<small>{t('settings.t2.help')}</small><button disabled={app.exposure > 0n}>{t('settings.save')}</button>
+	</form>
+	<button onclick={() => app.sync()}>{t('settings.sync')}</button>
+	<a class="button" href="/op">{t('nav.operator')}</a>
 
 	<button onclick={() => app.lock()}>{t('settings.lock')}</button>
 	<button onclick={erase}>{t('settings.reset')}</button>

@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator
@@ -23,7 +24,11 @@ from .config import Settings
 from .island import IslandMonitor, IslandState, http_probe
 from .ledger import Ledger
 from .lnd import LndBox
+from .operator import OperatorAuth
+from .price import PriceSnapshot
 from .receipts import Receipts
+from .settlement import Settlement
+from .transparency import read_liabilities
 
 log = logging.getLogger("coupured")
 
@@ -47,6 +52,30 @@ class IslandAction(BaseModel):
 
 class FundIn(BaseModel):
     bolt11: Bolt11
+
+
+class LoginIn(BaseModel):
+    pin: str = Field(pattern=r"^\d{6,12}$")
+
+
+class CashOutIntent(BaseModel):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    amount: str = Field(pattern=r"^[1-9][0-9]{0,6}$")
+    destination: str = Field(pattern=r"^(lnbcrt[0-9a-z]{20,1800}|demo:world)$")
+    created_at: int = Field(ge=0)
+    pubkey: str = Field(pattern=r"^[0-9a-f]{64}$")
+    signature: str = Field(pattern=r"^[0-9a-f]{128}$")
+
+
+class CashOutIn(BaseModel):
+    intent: CashOutIntent
+    token: str = Field(min_length=10, max_length=12000, pattern=r"^cashu[AB]")
+
+
+class ChangeIn(BaseModel):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    pubkey: str = Field(pattern=r"^[0-9a-f]{64}$")
+    signature: str = Field(pattern=r"^[0-9a-f]{128}$")
 
 
 class RateLimiter:
@@ -89,6 +118,12 @@ class Box:
         self.lnd = LndBox(s.lnd_rest, s.lnd_cert, s.lnd_macaroon, f"{s.uplink_host}:{s.world_peer_port}")
         self.hub = Hub()
         self.limiter = RateLimiter()
+        self.auth = OperatorAuth(s.operator_pin)
+        self.settlement = Settlement(s.settlement_url, s.queue_token)
+        self.started_at = time.time()
+        self.price = PriceSnapshot(
+            os.path.join(s.data_dir, "price.json"), f"http://{s.uplink_host}:{s.world_faucet_port}"
+        )
         self.monitor = IslandMonitor(
             probe=lambda: http_probe(s.uplink_host, s.uplink_probe_port, s.probe_timeout_s),
             reconcile=self.reconcile,
@@ -110,6 +145,25 @@ class Box:
             # Not ONLINE until Lightning really is: the monitor stays RECONCILING and retries on the next probe.
             raise ReconcileIncomplete(f"{summ.get('active', 0)}/{summ.get('channels', 0)} channels active")
         self.ledger.append("reconciled", {"peers_reconnected": n})
+
+    async def settle_loop(self) -> None:
+        while True:
+            if self.monitor.state == IslandState.ONLINE:
+                if time.time() - self.price.value.get("ts", 0) > 300:
+                    try:
+                        await self.price.refresh()
+                    except (httpx.HTTPError, ValueError, KeyError):
+                        pass
+                try:
+                    summary = await self.settlement.call("/drain", {})
+                    count = summary.get("settled", 0)
+                    if count != getattr(self, "_settled", 0):
+                        self.ledger.append("cashouts_settled", {"count": count})
+                        self._settled = count
+                        self.hub.publish(self.island_view())
+                except httpx.HTTPError:
+                    pass  # worker or uplink unavailable: durable queue retries on the next tick
+            await asyncio.sleep(5)
 
     async def _on_island_change(self, old: IslandState, new: IslandState, info: dict[str, Any]) -> None:
         e = self.ledger.append("island", {"from": old.value, "to": new.value, "why": info["why"]})
@@ -138,9 +192,8 @@ BoxDep = Annotated[Box, Depends(get_box)]
 
 
 def client_ip(req: Request) -> str:
-    # Caddy is the only peer that reaches us; it sets X-Forwarded-For to the phone's address.
-    fwd = req.headers.get("x-forwarded-for", "")
-    return fwd.split(",")[0].strip() or (req.client.host if req.client else "?")
+    # Uvicorn alone processes forwarded headers from the configured Caddy IP. Never trust raw XFF.
+    return req.client.host if req.client else "?"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -152,8 +205,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         box.ledger.append("boot", {"demo_mode": s.demo_mode})
         task = asyncio.create_task(box.monitor.run())
-        yield
-        task.cancel()
+        settlement_task = asyncio.create_task(box.settle_loop())
+        try:
+            yield
+        finally:
+            for t in (task, settlement_task):
+                t.cancel()
+            box.monitor._cancel_reconcile()
+            await asyncio.gather(task, settlement_task, return_exceptions=True)
 
     app = FastAPI(
         title="coupured",
@@ -166,13 +225,121 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def limit_body(request: Request, call_next):  # type: ignore[no-untyped-def]
-        if int(request.headers.get("content-length") or 0) > 16_384:
+        try:
+            length = int(request.headers.get("content-length") or 0)
+        except ValueError:
+            return JSONResponse({"detail": "invalid content length"}, status_code=400)
+        if length < 0:
+            return JSONResponse({"detail": "invalid content length"}, status_code=400)
+        if length > 16_384:
             return JSONResponse({"detail": "requête trop grande"}, status_code=413)
-        return await call_next(request)
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 16_384:
+                return JSONResponse({"detail": "requête trop grande"}, status_code=413)
+        request._body = bytes(body)
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     @app.get("/api/health")
     async def health(b: BoxDep) -> dict[str, Any]:
-        return {"ok": True, "island": b.monitor.state.value, "demo_mode": s.demo_mode}
+        return {
+            "ok": True,
+            "island": b.monitor.state.value,
+            "demo_mode": s.demo_mode,
+            "uptime_s": round(time.time() - b.started_at),
+            "network": "regtest",
+        }
+
+    @app.post("/api/operator/login")
+    async def operator_login(body: LoginIn, b: BoxDep, request: Request) -> dict[str, str]:
+        b.limiter.check(client_ip(request), "operator_login", 5, 300)
+        token = b.auth.login(body.pin)
+        if not token:
+            raise HTTPException(401, "code incorrect ou accès opérateur non configuré")
+        return {"token": token}
+
+    def operator_only(request: Request) -> None:
+        token = request.headers.get("authorization", "").removeprefix("Bearer ")
+        if not box.auth.valid(token):
+            raise HTTPException(401, "accès opérateur requis")
+
+    @app.get("/api/tableau")
+    async def tableau(b: BoxDep) -> dict[str, Any]:
+        liabilities = read_liabilities(s.snapshots_dir)
+        reserves = None
+        queue = None
+        try:
+            reserves = await asyncio.wait_for(b.lnd.summary(), 3)
+        except (httpx.HTTPError, OSError, RuntimeError, TimeoutError):
+            pass
+        try:
+            queue = await b.settlement.call("/summary")
+        except httpx.HTTPError:
+            pass
+        outstanding = liabilities["outstanding_sat"]
+        ratio = None
+        if outstanding and reserves is not None:
+            ratio = round(reserves["local_sat"] / outstanding, 4)
+        return {
+            "island": b.island_view(),
+            "liabilities": liabilities,
+            "reserves": reserves,
+            "queue": queue,
+            "coverage_ratio": ratio,
+            "coverage_basis": "lightning_channels_only",
+            "ledger": b.ledger.verify(),
+            "network": "regtest",
+            "custodial": True,
+        }
+
+    @app.get("/api/price")
+    async def price(b: BoxDep) -> dict[str, Any]:
+        return b.price.snapshot(b.monitor.state == IslandState.ONLINE)
+
+    @app.post("/api/cashouts")
+    async def cashout(body: CashOutIn, b: BoxDep, request: Request) -> dict[str, Any]:
+        b.limiter.check(client_ip(request), "cashout", 20, 60)
+        if not 10 <= int(body.intent.amount) <= 2_000_000:
+            raise HTTPException(422, "montant hors limites")
+        if body.intent.destination == "demo:world" and not s.demo_mode:
+            raise HTTPException(422, "destination de démo indisponible")
+        try:
+            result = await b.settlement.call(
+                "/enqueue",
+                {
+                    "intent": body.intent.model_dump(),
+                    "token": body.token,
+                    "publicMint": str(request.base_url).rstrip("/") + "/mint",
+                },
+            )
+        except httpx.HTTPError as e:
+            raise HTTPException(409, "retrait non confirmé, réessayez la même demande") from e
+        # No destination, token, signing key, or invoice in the public ledger.
+        b.ledger.append("cashout_queued", {"id": body.intent.id, "amount_sat": int(body.intent.amount)})
+        return result
+
+    @app.get("/api/cashouts/{job_id}")
+    async def cashout_status(job_id: str, pubkey: str, b: BoxDep, request: Request) -> dict[str, Any]:
+        b.limiter.check(client_ip(request), "cashout_status", 60, 60)
+        if not re.fullmatch(r"[0-9a-f]{32}", job_id) or not re.fullmatch(r"[0-9a-f]{64}", pubkey):
+            raise HTTPException(422, "identifiant invalide")
+        try:
+            return await b.settlement.call("/lookup", {"id": job_id, "pubkey": pubkey})
+        except httpx.HTTPError as e:
+            raise HTTPException(404, "retrait introuvable") from e
+
+    @app.post("/api/cashouts/change")
+    async def cashout_change(body: ChangeIn, b: BoxDep, request: Request) -> dict[str, Any]:
+        b.limiter.check(client_ip(request), "cashout_change", 20, 60)
+        try:
+            return await b.settlement.call(
+                "/change", {**body.model_dump(), "publicMint": str(request.base_url).rstrip("/") + "/mint"}
+            )
+        except httpx.HTTPError as e:
+            raise HTTPException(409, "monnaie indisponible, réessayez") from e
 
     @app.get("/api/island")
     async def island(b: BoxDep) -> dict[str, Any]:
@@ -244,7 +411,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not s.demo_mode:
             raise HTTPException(404, "not found")
 
-    @app.post("/api/demo/island", dependencies=[Depends(demo_only)])
+    @app.post("/api/demo/island", dependencies=[Depends(demo_only), Depends(operator_only)])
     async def demo_island(body: IslandAction, b: BoxDep, request: Request) -> dict[str, Any]:
         b.limiter.check(client_ip(request), "demo_island", 10, 60)
         state = await b.uplink_control(body.action)
